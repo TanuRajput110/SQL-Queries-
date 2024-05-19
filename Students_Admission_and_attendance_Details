@@ -1,0 +1,150 @@
+---------new_Session_student_data------------------------------------------------------------------------------------------------------
+with new_session as(
+
+  WITH retained_2yr_students AS (
+    SELECT *
+    FROM students_details
+    WHERE (Combined_center ILIKE '%Faridabad%' )
+    AND newpayment_checks ILIKE '%Total Paid%' 
+    AND enrolled_years = 2
+    AND status = 'Active'
+    AND new_program NOT ILIKE '%MIP%'
+    AND acad_year ILIKE '%AY23%'
+    AND form_status != 'Admission Cancelled'),
+  new_admission AS (
+    SELECT * 
+    FROM students_details
+    WHERE (Combined_center ILIKE '%Faridabad%' )
+    AND status = 'Active'
+    AND new_program NOT ILIKE '%MIP%'
+    AND acad_year ILIKE '%AY24%'
+    AND form_status != 'Admission Cancelled')
+SELECT *
+FROM retained_2yr_students  
+UNION 
+SELECT *
+FROM new_admission ),
+
+---------Fees_details------------------------------------------------------------------------------------------------------
+
+fee_details as 
+      (SELECT
+        regno as Regg_no,
+        scheme_amount_w_o_gst,
+        bill_amount,
+        net_amount_w_o_gst,
+        discountable_fee,
+        concession,
+        total_payable_with_gst,
+        first_receipt_date,
+        last_receipt_date,
+        arpu
+       FROM fees_Details),
+       
+---------Batch_details------------------------------------------------------------------------------------------------------       
+
+Batch_status  As 
+      (Select a.reg_no as Reg_num,a.batch as Batchh,b.phn_number as App_access_number,b.user_createdat,a.app_access_status,a.rfid_status,a.biometric_status,a.inventory_status,
+        a.batch_assigned_by,
+        a.total_batch_changes,
+        a.total_inventory_given,osd.school_name,osd.date_of_birth 
+      from mview.offline_batch_ops_details a
+      left join mview.mv_tbl__vw_bq_users_profile__0 b
+      on a.user_id =b.userid
+      left join offline.offline_students_humming osd 
+      on osd.reg_no = a.reg_no),
+----------------batch_student_mapping-------------------------------------------------------------------------------------------------      
+BSM as 
+(select regno,batch,student_name,class_course,n.batch_id,bsm.batch_subject_id,bsm.subject_name from new_session n 
+left join batch_subject_mapping bsm 
+on n.batch_id =bsm.batch_id 
+where subject_name not in ('Test Material','Notices') and batch ilike '%2024'),
+
+
+------------ (Attendance)------------------------------------------------------------------------------------------------
+Attendance as (select b.regno,punch_date,b.student_name,b.batch,case when punch_date is null then 'Absent' else 'Present' end as Status,schedule_date::date,b.class_course ,b.Combined_center
+from offline_student_attendance a 
+right join new_session b 
+on a.idcardno =b.regno 
+left join BSM  c 
+on c.batch_id =b.batch_id
+where schedule_date is not null
+order by 6 desc ),   
+
+-------------------------attendance percent(overall and last 1 and 2 month)--------------------------------------------------------------------------
+
+att_per as (select regno as registration_no,
+max(case when schedule_date >= '5 January, 2024' and schedule_date is not null then punch_date end ) as last_punch,
+min(case when schedule_date >= '5 January, 2024' and schedule_date is not null then punch_date end) as first_punch,
+count(distinct case when schedule_date >= '5 January, 2024' and schedule_date is not null then schedule_date end ) as schedule_all,
+count(distinct case when schedule_date >= '5 January, 2024' and schedule_date is not null then punch_date end ) as punch_all,
+count(distinct case when schedule_date >= current_date -30 and schedule_date is not null then schedule_date end ) as schedule_1,
+count(distinct case when schedule_date >= current_date -30   and schedule_date is not null then punch_date end ) as punch_1,
+count(distinct case when schedule_date >= current_date -60 and schedule_date is not null then schedule_date end ) as schedule_2,
+count(distinct case when schedule_date >= current_date -60   and schedule_date is not null then punch_date end ) as punch_2
+from Attendance
+group by 1),
+  
+      
+      
+-----------------------final query--summarised-----------------------------------------------------------------------------------------------------------------------------
+final_query as (
+
+select *,extract(month from ns.joining_date) as Month,extract(year from ns.joining_date) as Year,
+
+CASE 
+        WHEN ns.fees_paid >= 9999 and ns.vp_ps_regular_schemes = 'True' THEN 'Applied' 
+        WHEN ns.fees_paid >= 0.9 * ns.fees_amt and ns.vp_ps_regular_schemes = 'True' THEN 'Applied' 
+        ELSE 'Not Applied'
+       
+    END AS arpu_appliedcond,
+
+   
+CASE 
+        WHEN ns.vp_ps_regular_schemes = 'True' 
+        THEN (fd.concession / fd.scheme_amount_w_o_gst)
+        ELSE ''
+    END AS Dis_per, 
+
+    
+case when ns.source_name = 'PW14713' then 'Nainika Bhatia' 
+     when ns.source_name = 'PW10829' then 'Deepanshu Valecha'
+     when ns.source_name = 'PW10082' then 'Garima Pant'
+     when ns.source_name = 'PW15404' then 'Arbaaz Khan'
+     when ns.source_name = 'PW16102' then 'Sourya Tiwari'
+     when ns.source_name = 'PW14405' then 'Manshi'
+     when ns.source_name = 'PW15467' then 'Nancy'
+     when ns.source_name = 'PW14184' then 'Anshika'
+     when ns.source_name = 'PW14392' then 'Subham'
+     when ns.source_name = 'Pw14405' then 'Mansi'
+     else Null 
+   end as Counsellor_Name,
+   
+CASE WHEN (ns.jodo_status ilike 'Active') THEN 'Jodo Active'
+        WHEN (ns.jodo_status ilike 'cancelled') THEN 'Jodo Cancelled'
+        WHEN (ns.jodo_status ilike 'expired') THEN 'Jodo Expired'
+        WHEN (ns.ep_status = 'ENACH') or (ns.ep_status = 'LOAN')  THEN 'loan/enach Active'
+        ELSE 'No Finance' 
+    END as Finance_Status 
+    
+
+from  new_session ns 
+left join fee_details fd 
+on ns.regno =fd.Regg_no
+left join Batch_status bs 
+on ns.regno=bs.Reg_num
+left join att_per ap 
+on ap.registration_no =ns.regno)
+
+
+-----------------------------------------------------------Output query-----------------------------------------------------------------------------------------
+
+select Combined_center as Center_name,regno,case when acad_year = 'AY24' then 'NEW' else 'OLD' end as acad_year,Student_id,student_name,batch,newscheme,new_program,marketing_executive_id,source_name,joining_date,jodo_status,
+       stream,id_card_no,roll_no,form_status,reg_from_date,batch_start_date,enrolled_years,fees_amt,fees_paid,balance,first_amount_paid,admission_mode,fees_per,
+       scheme_amount_w_o_gst,bill_amount,net_amount_w_o_gst,discountable_fee,concession,total_payable_with_gst,first_receipt_date,last_receipt_date,newpayment_checks,
+       arpu,arpu_appliedcond,ay24_enrollment_status,eligibility_status ,Dis_per,batch_assigned_by,total_batch_changes,app_access_status,rfid_status,inventory_status,total_inventory_given,
+       region,father_name,batch_preference,class_course,day_preference_name,ep_status,month,year,finance_status,city,state,Counsellor_Name,school_name,gender,App_access_number,user_createdat,jodo_updatedate,date_of_birth,
+       last_punch,first_punch,schedule_all,punch_all,concat((punch_all*100/schedule_all),'%') as attd_per_all,schedule_1,punch_1,concat((punch_1*100/schedule_1),'%') as attd_per_1,
+       schedule_2,punch_2,concat((punch_2*100/schedule_2),'%') as attd_per_2
+from final_query
+order by joining_date desc
