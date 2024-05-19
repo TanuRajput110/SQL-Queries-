@@ -48,10 +48,10 @@ Batch_status  As
         a.batch_assigned_by,
         a.total_batch_changes,
         a.total_inventory_given,osd.school_name,osd.date_of_birth 
-      from mview.offline_batch_ops_details a
-      left join mview.mv_tbl__vw_bq_users_profile__0 b
+      from offline_batch_ops_details a
+      left join mv_tbl__vw_bq_users_profile__0 b
       on a.user_id =b.userid
-      left join offline.offline_students_humming osd 
+      left join students_humming osd 
       on osd.reg_no = a.reg_no),
 ----------------batch_student_mapping-------------------------------------------------------------------------------------------------      
 BSM as 
