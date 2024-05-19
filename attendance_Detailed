@@ -1,0 +1,99 @@
+----------1.new session admission (retained + fresh)--------------------------------------------------------------------------------------------------------------------------------
+
+with new_session as (WITH retained_2yr_students AS (
+    SELECT *
+    FROM students_details
+    WHERE Combined_center ILIKE '%faridabad%' 
+    AND newpayment_checks ILIKE '%Total Paid%' 
+    AND enrolled_years = 2
+    AND status = 'Active'
+    AND new_program NOT ILIKE '%MIP%'
+    AND acad_year ILIKE '%AY23%'
+),
+new_admission AS (
+    SELECT * 
+    FROM students_details
+    WHERE Combined_center ILIKE '%faridabad%' 
+    AND status = 'Active'
+    AND new_program NOT ILIKE '%MIP%'
+    AND acad_year ILIKE '%AY24%'
+)
+
+SELECT Regno, Batch, student_name, batch_id, class_course ,Combined_center
+FROM retained_2yr_students  
+UNION 
+SELECT Regno, Batch, student_name, batch_id, class_course ,Combined_center 
+FROM new_admission ),
+
+BSM as 
+(select regno,batch,student_name,class_course,n.batch_id,bsm.batch_subject_id,bsm.subject_name from new_session n 
+left join batch_subject_mapping bsm 
+on n.batch_id =bsm.batch_id 
+where subject_name not in ('Test Material','Notices') and batch ilike '%2024'),
+
+
+------------final output 1 (Attendance)------------------------------------------------------------------------------------------------
+Attendance as (select b.regno,punch_date,b.student_name,b.batch,case when punch_date is null then 'Absent' else 'Present' end as Status,schedule_date::date,b.class_course ,b.Combined_center
+from offline_student_attendance a 
+right join new_session b 
+on a.idcardno =b.regno 
+left join BSM  c 
+on c.batch_id =b.batch_id
+where schedule_date is not null
+order by 6 desc ),
+
+-------------------------attendance percent(overall and last 2 month)--------------------------------------------------------------------------
+
+att_per as (select regno,
+max(case when schedule_date >= '2024-01-05' and schedule_date is not null then punch_date end ) as last_punch,
+min(case when schedule_date >= '2024-01-05' and schedule_date is not null then punch_date end) as first_punch,
+(count(distinct case when schedule_date >= '2024-01-05' and schedule_date is not null then punch_date end )*100.0 /nullif(count(distinct case when schedule_date >= '2024-01-05' and schedule_date is not null then schedule_date end),0)) as Attendance_per ,
+(count(distinct case when schedule_date >= Current_date::Date - 60  and schedule_date is not null then punch_date end )*100.0 /nullif(count(distinct case when schedule_date >= Current_date::Date - 60 and schedule_date is not null then schedule_date end),0)) as Attendance_per_last_2_month 
+from Attendance 
+group by regno),
+
+--------------------------final Output 2 (batchwise das/was)----------------------------------------------------------------
+LastWeekAttendance AS (
+    SELECT 
+    batch,
+    COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 7 AND schedule_date IS NOT NULL THEN regno END) AS enrolled_count_last_week,
+    COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 7 AND punch_date IS NOT NULL THEN regno END) AS present_count_last_week,
+    (COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 7 AND punch_date IS NOT NULL THEN regno END) * 100.0 / 
+     NULLIF(COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 7 AND schedule_date IS NOT NULL THEN regno END), 0)) AS WAS_per,
+     
+     COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 1 AND schedule_date IS NOT NULL THEN regno END) AS enrolled_count,
+    COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 1 AND punch_date IS NOT NULL THEN regno END) AS present_count,
+    (COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 1 AND punch_date IS NOT NULL THEN regno END) * 100.0 / 
+     NULLIF(COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 1 AND schedule_date IS NOT NULL THEN regno END), 0)) AS DAS_per
+     
+FROM Attendance
+GROUP BY batch
+),
+
+
+--------------------------final Output3(centerwise das/was)----------------------------------------------------------------
+centerAttendance AS (
+    SELECT 
+    Combined_center,
+    COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 7 AND schedule_date IS NOT NULL THEN regno END) AS enrolled_count_last_week,
+    COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 7 AND punch_date IS NOT NULL THEN regno END) AS present_count_last_week,
+    (COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 7 AND punch_date IS NOT NULL THEN regno END) * 100.0 / 
+     NULLIF(COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 7 AND schedule_date IS NOT NULL THEN regno END), 0)) AS WAS_per,
+     
+     COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 1 AND schedule_date IS NOT NULL THEN regno END) AS enrolled_count,
+    COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 1 AND punch_date IS NOT NULL THEN regno END) AS present_count,
+    (COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 1 AND punch_date IS NOT NULL THEN regno END) * 100.0 / 
+     NULLIF(COUNT(DISTINCT CASE WHEN schedule_date >= Current_date::Date - 1 AND schedule_date IS NOT NULL THEN regno END), 0)) AS DAS_per
+     
+FROM Attendance
+GROUP BY 1
+)
+
+
+
+---------------------------------------------------execute one of all by removing comment-------------------------------------------    
+--select * from Attendance 
+select *,(case when Attendance_per_last_2_month =0 or Attendance_per_last_2_month is  null then 'Inactive' else 'Active' end) as Status_of_student from att_per
+--select * from LastWeekAttendance
+--select * from centerAttendance
+
