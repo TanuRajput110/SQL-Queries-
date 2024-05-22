@@ -125,7 +125,7 @@ CASE WHEN (ns.jodo_status ilike 'Active') THEN 'Jodo Active'
         WHEN (ns.jodo_status ilike 'expired') THEN 'Jodo Expired'
         WHEN (ns.ep_status = 'ENACH') or (ns.ep_status = 'LOAN')  THEN 'loan/enach Active'
         ELSE 'No Finance' 
-    END as Finance_Status 
+    END as Finance_Status ,,row_number() over(partition by regno order by joining_date desc) as rank_
     
 
 from  new_session ns 
@@ -147,4 +147,5 @@ select Combined_center as Center_name,regno,case when acad_year = 'AY24' then 'N
        last_punch,first_punch,schedule_all,punch_all,concat((punch_all*100/schedule_all),'%') as attd_per_all,schedule_1,punch_1,concat((punch_1*100/schedule_1),'%') as attd_per_1,
        schedule_2,punch_2,concat((punch_2*100/schedule_2),'%') as attd_per_2
 from final_query
+where rank_=1
 order by joining_date desc
